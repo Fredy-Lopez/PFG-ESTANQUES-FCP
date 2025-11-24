@@ -1,0 +1,1003 @@
+// ===============================================================
+// 🌊 MONITOREO DE ESTANQUES — SCRIPT PRINCIPAL (mobile_v2.js)
+// ===============================================================
+// Autor: Fredy López Mendoza
+// Proyecto: Sistema de monitoreo y control de estanques (FCP)
+// Descripción: UI (menú, secciones), simulación de datos, gráfica,
+// control manual, historial, notificaciones y errores (modal).
+// ===============================================================
+
+
+// ===== 🧰 BASE & UTILIDADES ===================================================
+
+// Detección de dispositivo táctil
+const IS_TOUCH =
+  window.matchMedia("(hover: none) and (pointer: coarse)").matches ||
+  "ontouchstart" in window;
+
+// Helper: aplicar efecto interactivo (hover/touch)
+function applyInteractiveButton(selector, options = {}) {
+  const btn = typeof selector === "string" ? document.querySelector(selector) : selector;
+  if (!btn) return;
+
+  if (IS_TOUCH) {
+    [...btn.classList].forEach((cls) => {
+      if (cls.startsWith("hover:")) btn.classList.remove(cls);
+    });
+
+    const down = () => { btn.style.transform = "scale(0.97)"; btn.style.filter = "brightness(0.9)"; };
+    const up   = () => { btn.style.transform = ""; btn.style.filter = ""; };
+
+    btn.addEventListener("touchstart",  down, { passive: true });
+    btn.addEventListener("touchend",    up,   { passive: true });
+    btn.addEventListener("touchcancel", up,   { passive: true });
+    btn.addEventListener("touchmove",   up,   { passive: true });
+
+  } else {
+    if (options.hoverClass) btn.classList.add(options.hoverClass);
+  }
+}
+
+// Texto seguro
+const txt = (x) => (x == null ? "" : String(x));
+
+// ===== 🧭 MÓDULO: MENÚ / NAVEGACIÓN ===========================================
+
+const sideMenu       = document.getElementById("sideMenu");
+const menuBtn        = document.getElementById("menuBtn");
+const closeMenu      = document.getElementById("closeMenu");
+const notifBtn       = document.getElementById("notifBtn");
+const notifDropdown  = document.getElementById("notifDropdown");
+const menuOptions    = document.querySelectorAll(".menu-option");
+
+menuBtn.onclick   = () => sideMenu.classList.replace("-translate-x-full", "show");
+closeMenu.onclick = () => sideMenu.classList.replace("show", "-translate-x-full");
+
+window.addEventListener("click", (e) => {
+  if (!sideMenu.contains(e.target) && !menuBtn.contains(e.target)) {
+      sideMenu.classList.replace("show", "-translate-x-full");
+  }
+});
+
+// Notificaciones toggle
+notifBtn.onclick = (e) => {
+  e.stopPropagation();
+  notifDropdown.classList.toggle("hidden");
+};
+window.addEventListener("click", (e) => {
+  if (!notifDropdown.contains(e.target) && !notifBtn.contains(e.target)) {
+      notifDropdown.classList.add("hidden");
+  }
+});
+
+
+// Secciones
+const weatherSection = document.getElementById("weatherSection");
+const cardsSection   = document.getElementById("monitoreoSection");
+const chartsSection  = document.getElementById("chartsSection");
+const controlSection = document.getElementById("controlSection");
+const historySection = document.getElementById("historySection");
+
+let currentSection = "monitoreo";
+const mdUp = () => window.matchMedia("(min-width: 768px)").matches;
+
+function setActiveMenu(key) {
+  menuOptions.forEach((b) => {
+      const active = b.dataset.section === key;
+      b.classList.toggle("border-b-2", active);
+      b.classList.toggle("border-orange-500", active);
+      b.classList.toggle("text-orange-400", active);
+  });
+}
+
+function showSection(key) {
+  currentSection = key;
+
+  const show = (el, v) => el.classList.toggle("hidden", !v);
+
+  if (key === "monitoreo") {
+      show(weatherSection, true);
+      show(cardsSection, true);
+      show(chartsSection, false);
+      show(controlSection, false);
+      show(historySection, false);
+  } else if (key === "graficas") {
+      initChartOnce();
+      syncButtonsFromState();
+      show(weatherSection, true);
+      show(chartsSection, true);
+      show(cardsSection, mdUp());
+      show(controlSection, false);
+      show(historySection, false);
+  } else if (key === "control") {
+      show(weatherSection, false);
+      show(cardsSection, false);
+      show(chartsSection, false);
+      show(controlSection, true);
+      show(historySection, false);
+  } else if (key === "historial") {
+      show(weatherSection, false);
+      show(cardsSection, false);
+      show(chartsSection, false);
+      show(controlSection, false);
+      show(historySection, true);
+  }
+
+  setActiveMenu(key);
+}
+
+menuOptions.forEach((btn) => {
+  btn.addEventListener("click", () => {
+      showSection(btn.dataset.section);
+      sideMenu.classList.remove("show");
+      sideMenu.classList.add("-translate-x-full");
+  });
+});
+
+window.addEventListener("resize", () => {
+  if (currentSection === "graficas") showSection("graficas");
+});
+
+setActiveMenu("monitoreo");
+
+applyInteractiveButton(menuBtn);
+applyInteractiveButton(closeMenu);
+applyInteractiveButton(notifBtn);
+document.querySelectorAll("header button").forEach((b) => applyInteractiveButton(b));
+
+// ===============================================================
+// 📡 CARGA REAL DE SENSORES DESDE BACKEND
+// ===============================================================
+function setVal(key, value) {
+  const el = document.getElementById(`val-${key}`);
+  if (el) el.textContent = value;
+}
+
+async function loadLatestSensores() {
+  try {
+    const res = await fetch("/api/sensores");
+    const data = await res.json();
+
+    // Si hay datos válidos, actualizar valores en pantalla
+    if (data.ph != null) {
+      setVal("ph", Number(data.ph).toFixed(2));
+      setVal("o2", Number(data.o2).toFixed(2));
+      setVal("temp", Number(data.temp).toFixed(2));
+    }
+
+  } catch (e) {
+    console.error("❌ Error cargando sensores:", e);
+  }
+}
+
+// Ejecutar cada 4 segundos
+setInterval(loadLatestSensores, 4000);
+loadLatestSensores();
+
+// ==============================================
+// 🌤️ CLIMA DESDE BACKEND (/api/clima)
+// ==============================================
+async function loadWeather() {
+  try {
+    const res = await fetch("/api/clima");
+    const data = await res.json();
+
+    // Datos reales o simulados desde Flask
+    const clima = data.data;
+
+    // La API real usa Kelvin → pero ahora estamos simulando
+    const temp = clima.main.temp;
+    const hum = clima.main.humidity;
+    const wind = clima.wind.speed;
+    
+    // ======================
+	// 🌤️ Ícono del clima
+	// ======================
+	try {
+		if (clima.weather && clima.weather.length > 0) {
+			const iconCode = clima.weather[0].icon; // ej: "04d", "01n"
+			const iconUrl = `https://openweathermap.org/img/wn/${iconCode}@2x.png`;
+
+			const iconEl = document.getElementById("weather-icon");
+			iconEl.src = iconUrl;
+			iconEl.classList.remove("hidden");
+		}
+	} catch (e) {
+		console.warn("Icono de clima no disponible:", e);
+	}
+
+    // Actualizar UI
+    document.getElementById("weather-temp").textContent = `${temp} °C`;
+    document.getElementById("weather-hum").textContent = `${hum} %`;
+    document.getElementById("weather-wind").textContent = `${wind} km/h`;
+
+    console.log("Clima cargado:", data);
+
+  } catch (err) {
+    console.error("❌ Error cargando clima:", err);
+  }
+}
+
+// Ejecutar cada 120 segundos
+setInterval(loadWeather, 120000);
+loadWeather();
+
+
+// ===== 📊 MÓDULO: GRÁFICA REAL ====================================================
+
+// Instancia del gráfico
+let chartInstance = null;
+
+// Estado inicial de visibilidad de datasets
+const datasetVisibility = [false, false, false, true, true];
+
+// ======================================================
+// 📡 HISTORIAL REAL DESDE BACKEND PARA GRÁFICAS
+// ======================================================
+async function loadHistoryForChart() {
+  try {
+    const res = await fetch("/api/historial");
+    const data = await res.json();   // Lista de lecturas DESC
+
+    if (!chartInstance) return;
+
+    // Tomar solo las últimas 20 lecturas
+    const last = data.slice(0, 20).reverse(); 
+
+    // Etiquetas → hora en formato HH:MM
+    const labels = last.map(item => item.hora?.slice(0, 5) || "--:--");
+
+    // Datos reales
+    const temp = last.map(item => item.temp);
+    const o2   = last.map(item => item.o2);
+    const ph   = last.map(item => item.ph);
+    
+    // CO₂ y amonio (si no existen en BD, se dejan nulos)
+    const co2     = last.map(item => item.co2 || null);
+    const turbidez  = last.map(item => item.turbidez || null);
+
+    // Asignar a Chart.js
+    chartInstance.data.labels = labels;
+    chartInstance.data.datasets[0].data = temp;
+    chartInstance.data.datasets[1].data = o2;
+    chartInstance.data.datasets[2].data = ph;
+
+    if (chartInstance.data.datasets[3]) 
+      chartInstance.data.datasets[3].data = co2;
+    if (chartInstance.data.datasets[4]) 
+      chartInstance.data.datasets[4].data = turbidez;
+
+    chartInstance.update("none");
+
+  } catch (err) {
+    console.error("❌ Error cargando historial para gráficas:", err);
+  }
+}
+
+// ======================================================
+// 📈 Inicializar la gráfica SOLO una vez
+// ======================================================
+function initChartOnce() {
+  if (chartInstance) return;
+
+  const ctx = document.getElementById("mainChart")?.getContext("2d");
+  if (!ctx) return;
+
+  chartInstance = new Chart(ctx, {
+    type: "line",
+    data: {
+      labels: [], // serán reemplazadas por datos reales
+      datasets: [
+        {
+          label: "Temperatura (°C)",
+          data: [],
+          borderColor: "#FF8C00",
+          backgroundColor: "rgba(255,140,0,0.15)",
+          tension: 0.3,
+          hidden: datasetVisibility[0],
+        },
+        {
+          label: "Oxígeno (mg/L)",
+          data: [],
+          borderColor: "#00BFFF",
+          backgroundColor: "rgba(0,191,255,0.15)",
+          tension: 0.3,
+          hidden: datasetVisibility[1],
+        },
+        {
+          label: "pH",
+          data: [],
+          borderColor: "#32CD32",
+          backgroundColor: "rgba(50,205,50,0.15)",
+          tension: 0.3,
+          hidden: datasetVisibility[2],
+        },
+        {
+          label: "CO₂ (mg/L)",
+          data: [],
+          borderColor: "#AAAAAA",
+          backgroundColor: "rgba(180,180,180,0.15)",
+          tension: 0.3,
+          hidden: datasetVisibility[3],
+        },
+        {
+          label: "Turbidez (NTU)",
+          data: [],
+          borderColor: "#8A2BE2",
+          backgroundColor: "rgba(138,43,226,0.15)",
+          tension: 0.3,
+          hidden: datasetVisibility[4],
+        },
+      ],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          enabled: true,
+          backgroundColor: "rgba(0, 0, 0, 0.75)",
+        },
+      },
+      scales: {
+        x: { ticks: { color: "#CBD5E1" } },
+        y: { ticks: { color: "#CBD5E1" } },
+      },
+    },
+  });
+
+  setupVariableButtons();
+  syncButtonsFromState();
+}
+
+
+
+// ======================================================
+// 🎛️ Botones de activar / desactivar variables
+// ======================================================
+function setupVariableButtons() {
+  document.querySelectorAll(".varBtn").forEach((btn) => {
+    applyInteractiveButton(btn, { hoverClass: "hover:bg-opacity-90" });
+
+    btn.addEventListener("click", () => {
+      const i = parseInt(btn.dataset.var, 10);
+      datasetVisibility[i] = !datasetVisibility[i];
+      chartInstance.data.datasets[i].hidden = datasetVisibility[i];
+      chartInstance.update();
+      btn.classList.toggle("opacity-50", datasetVisibility[i]);
+    });
+  });
+}
+
+function syncButtonsFromState() {
+  document.querySelectorAll(".varBtn").forEach((btn) => {
+    const i = parseInt(btn.dataset.var, 10);
+    btn.classList.toggle("opacity-50", datasetVisibility[i]);
+  });
+}
+
+
+// ======================================================
+// 🔁 Actualización periódica del gráfico
+// ======================================================
+setInterval(() => {
+  if (chartInstance) loadHistoryForChart();
+}, 5000);
+
+
+// ===== ⚙️ CONTROL MANUAL ===================================
+const phToggleBtn       = document.getElementById("togglePhControl");
+const o2ToggleBtn       = document.getElementById("toggleO2Control");
+const phControls        = document.getElementById("phManualControls");
+const o2Controls        = document.getElementById("o2ManualControls");
+
+const doseLimeBtn       = document.getElementById("doseLime");
+const doseCitricBtn     = document.getElementById("doseCitric");
+const phDosePreset      = document.getElementById("phDosePreset");
+
+const startAeratorsBtn  = document.getElementById("startAerators");
+const o2DurationInput   = document.getElementById("o2Duration");
+
+const emergencyBtn      = document.getElementById("btnEmergency");
+
+applyInteractiveButton(phToggleBtn, {hoverClass: "hover:bg-green-700"});
+applyInteractiveButton(o2ToggleBtn, {hoverClass: "hover:bg-green-700"});
+applyInteractiveButton(doseLimeBtn,   { hoverClass: "hover:bg-green-700" });
+applyInteractiveButton(doseCitricBtn, { hoverClass: "hover:bg-red-700" });
+applyInteractiveButton(startAeratorsBtn, { hoverClass: "hover:bg-blue-700" });
+
+// ------- Indicadores -------
+let estadoV24 = {};
+let ultimoEstadoJson = "";
+let cooldownInterval = null;
+
+// ------- Refrescar estado desde Flask -------
+async function loadEstadoV24() {
+  try {
+    const res = await fetch("/api/estado_v24");
+    const data = await res.json();
+
+    const nuevoJSON = JSON.stringify(data);
+
+    // Determinar si realmente hay un cambio
+    const huboCambio = nuevoJSON !== ultimoEstadoJson;
+    ultimoEstadoJson = nuevoJSON;
+
+    estadoV24 = data;
+    estadoV24._last_update_ok = huboCambio;
+
+    actualizarUIControlManual();
+  } catch (e) {
+    console.error("❌ Error cargando estado v24", e);
+  }
+}
+
+
+setInterval(loadEstadoV24, 1000);
+loadEstadoV24();
+
+// ===========================================================
+//         ACTUALIZAR LA UI SEGÚN ESTADO DEL BACKEND
+// ===========================================================
+function actualizarUIControlManual() {
+  const st = estadoV24;
+  if (!st) return;
+  
+  // Estado global PID
+	document.getElementById("pidPhStatus").textContent =
+    st.pid_paused_ph ? "Manual" : "Automático";
+
+	document.getElementById("pidO2Status").textContent =
+    st.pid_paused_o2 ? "Manual" : "Automático";
+
+
+ // =======================================================
+//               BOTÓN PH (toggle)
+// =======================================================
+if (st.pid_paused_ph) {
+    phToggleBtn.textContent = "Desactivar Control Manual pH";
+    phToggleBtn.classList.add("bg-green-600");
+    phControls.classList.remove("hidden");
+} else {
+    phToggleBtn.textContent = "Activar Control Manual pH";
+    phToggleBtn.classList.remove("bg-green-600");
+    phControls.classList.add("hidden");
+}
+
+// =======================================================
+//               BOTÓN O2 (toggle)
+// =======================================================
+if (st.pid_paused_o2) {
+    o2ToggleBtn.textContent = "Desactivar Control Manual O₂";
+    o2ToggleBtn.classList.add("bg-green-600");
+    o2Controls.classList.remove("hidden");
+} else {
+    o2ToggleBtn.textContent = "Activar Control Manual O₂";
+    o2ToggleBtn.classList.remove("bg-green-600");
+    o2Controls.classList.add("hidden");
+}
+
+// =======================================================
+//               COOLDOWN + BLOQUEOS
+// =======================================================
+const ahora = Date.now() / 1000;
+
+const ultimoPH = Math.max(st.ultimo_ph_up || 0, st.ultimo_ph_down || 0);
+const tiempoDesdeUltimoPH = ultimoPH ? (ahora - ultimoPH) : Infinity;
+
+const enCooldown = tiempoDesdeUltimoPH < st.cooldown;
+const segundosRestantes = Math.max(0, st.cooldown - tiempoDesdeUltimoPH);
+
+const hayTareaPH = st.tareas.some(t => t.tipo === "pH↑" || t.tipo === "pH↓");
+const hayTareaO2 = st.tareas.some(t => t.tipo === "O2");
+
+// =======================================================
+//           BLOQUEO DE BOTONES (NUEVA LÓGICA)
+// =======================================================
+
+// 1) PH: Cal Viva + Ácido
+const phBloqueado = hayTareaPH || st.bloqueo_ph || enCooldown;
+
+doseLimeBtn.disabled = phBloqueado;
+doseCitricBtn.disabled = phBloqueado;
+
+doseLimeBtn.classList.toggle("opacity-50", phBloqueado);
+doseCitricBtn.classList.toggle("opacity-50", phBloqueado);
+
+// 2) Toggle PH – solo bloquear si hay tarea activa (NO en cooldown)
+if (hayTareaPH) {
+    phToggleBtn.disabled = true;
+    phToggleBtn.classList.add("opacity-50", "pointer-events-none");
+} else {
+    phToggleBtn.disabled = false;
+    phToggleBtn.classList.remove("opacity-50", "pointer-events-none");
+}
+
+// 3) Toggle O2 – solo bloquear si hay tarea O₂ activa
+if (hayTareaO2) {
+    o2ToggleBtn.disabled = true;
+    o2ToggleBtn.classList.add("opacity-50", "pointer-events-none");
+} else {
+    o2ToggleBtn.disabled = false;
+    o2ToggleBtn.classList.remove("opacity-50", "pointer-events-none");
+}
+
+// =======================================================
+//                INDICADORES VISUALES
+// =======================================================
+const cdLbl = document.getElementById("phCooldownLabel");
+const blLbl = document.getElementById("phBlockLabel");
+
+if (st.bloqueo_ph) blLbl.classList.remove("hidden");
+else blLbl.classList.add("hidden");
+
+if (enCooldown) {
+    cdLbl.textContent = `⏳ Cooldown: ${Math.ceil(segundosRestantes/60)} min`;
+    cdLbl.classList.remove("hidden");
+} else {
+    cdLbl.classList.add("hidden");
+}
+
+  // ===== TAREA MANUAL pH =====
+  const lblPhTask = document.getElementById("phTaskLabel");
+  const tareaPh = st.tareas.find(t => t.tipo === "pH↑" || t.tipo === "pH↓");
+
+  if (tareaPh) {
+    const remaining = Math.max(0, tareaPh.t_fin - (Date.now()/1000));
+    lblPhTask.textContent =
+        `${tareaPh.tipo} activa — ${Math.ceil(remaining)} s restantes`;
+    lblPhTask.classList.remove("hidden");
+  }else {
+    lblPhTask.classList.add("hidden");
+}
+
+
+
+  // =======================================================
+  //               BOTÓN O2 (toggle)
+  // =======================================================
+  
+  // ===== TAREA MANUAL O₂ =====
+	const lblO2Task = document.getElementById("o2TaskLabel");
+	const tareaO2 = st.tareas.find(t => t.tipo === "O2");
+
+	if (tareaO2) {
+		const remaining = Math.max(0, tareaO2.t_fin - (Date.now()/1000));
+		lblO2Task.textContent =
+			`Aireadores activos — ${Math.ceil(remaining)} s restantes`;
+		lblO2Task.classList.remove("hidden");
+	} else {
+		lblO2Task.classList.add("hidden");
+	}
+
+  if (st.pid_paused_o2) {
+    o2ToggleBtn.textContent = "Desactivar Control Manual O₂";
+    o2ToggleBtn.classList.add("bg-green-600");
+    o2Controls.classList.remove("hidden");
+  } else {
+    o2ToggleBtn.textContent = "Activar Control Manual O₂";
+    o2ToggleBtn.classList.remove("bg-green-600");
+    o2Controls.classList.add("hidden");
+  }
+
+  // =======================================================
+  //               TAREA MANUAL O2 ACTIVA
+  // =======================================================
+	// Botón dinámico: Encender / Detener
+	if (tareaO2) {
+		startAeratorsBtn.textContent = "Detener";
+		startAeratorsBtn.classList.remove("bg-blue-600", "hover:bg-blue-700");
+		startAeratorsBtn.classList.add("bg-red-600", "hover:bg-red-700");
+		startAeratorsBtn.dataset.mode = "stop";
+	} else {
+		startAeratorsBtn.textContent = "Encender";
+		startAeratorsBtn.classList.remove("bg-red-600", "hover:bg-red-700");
+		startAeratorsBtn.classList.add("bg-blue-600", "hover:bg-blue-700");
+		startAeratorsBtn.dataset.mode = "start";
+	}
+	
+	// === PARADA DE EMERGENCIA: mostrar solo si algún PID está en manual ===
+
+	if (st.pid_paused_ph || st.pid_paused_o2) {
+		emergencyBtn.classList.remove("hidden");
+	} else {
+		emergencyBtn.classList.add("hidden");
+	}
+
+}
+
+
+// ===========================================================
+//               ACCIONES DE BOTONES
+// ===========================================================
+
+async function refreshEstadoSeguro() {
+    // intentar varias veces hasta ver que el estado cambió
+    for (let i = 0; i < 6; i++) { // 6 intentos = ~600 ms
+        await new Promise(r => setTimeout(r, 100)); // espera 100ms
+        await loadEstadoV24();
+
+        // si el backend ya reflejó cambio → salir
+        if (estadoV24 && estadoV24._last_update_ok) break;
+    }
+}
+
+async function enviarComandoTCP(cmd) {
+  try {
+    const res = await fetch("/api/tcp_send", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ cmd })
+    });
+
+    const data = await res.json();
+
+    // Recargar ESTADO REAL inmediatamente después del comando
+    await refreshEstadoSeguro();
+
+    return data.ok;
+  } catch (e) {
+    alert("Error comunicando con el sistema");
+    return false;
+  }
+}
+
+emergencyBtn.addEventListener("click", async () => {
+    const ok = await enviarComandoTCP("6 2");  // APAGAR TODO
+    if (ok) {
+        emergencyBtn.textContent = "¡Todo detenido!";
+        emergencyBtn.classList.add("opacity-60");
+        setTimeout(() => {
+            emergencyBtn.textContent = "Parada de Emergencia";
+            emergencyBtn.classList.remove("opacity-60");
+        }, 2000);
+    }
+});
+
+
+// ----- Activar / desactivar PH -----
+phToggleBtn.addEventListener("click", async () => {
+    const cmd = estadoV24.pid_paused_ph ? "1" : "4";
+    await enviarComandoTCP(cmd);
+});
+
+
+// ----- Activar / desactivar O₂ -----
+o2ToggleBtn.addEventListener("click", async () => {
+    const cmd = estadoV24.pid_paused_o2 ? "2" : "5";
+    await enviarComandoTCP(cmd);
+});
+
+
+// ----- pH ↑ -----
+doseLimeBtn.addEventListener("click", async () => {
+  const preset = phDosePreset.value;
+  await enviarComandoTCP(`8 ${preset}`);
+});
+
+// ----- pH ↓ -----
+doseCitricBtn.addEventListener("click", async () => {
+  const preset = phDosePreset.value;
+  await enviarComandoTCP(`9 ${preset}`);
+});
+//------- Activar O2 por cierto tiempo--------
+startAeratorsBtn.addEventListener("click", async () => {
+    const mode = startAeratorsBtn.dataset.mode;
+
+    if (mode === "start") {
+
+        const dur = parseInt(o2DurationInput.value);
+        if (isNaN(dur) || dur <= 0) return alert("Duración inválida.");
+
+        const unit = document.getElementById("o2Unit").value;
+
+        // Conversión correcta
+        let seconds = 0;
+
+        if (unit === "min") {
+            seconds = dur * 60;
+        } else if (unit === "h") {
+            seconds = dur * 3600;
+        }
+
+        await enviarComandoTCP(`7 ${seconds}`);
+    }
+
+    else if (mode === "stop") {
+        await enviarComandoTCP("6 1");
+    }
+});
+
+
+
+// ===== 🕓 MÓDULO: HISTORIAL ===================================================
+
+const historyTableBody = document.getElementById("historyTableBody");
+const filterDate   = document.getElementById("filterDate");
+const filterType   = document.getElementById("filterType");
+const applyFilter  = document.getElementById("applyFilter");
+
+applyInteractiveButton(applyFilter, { hoverClass: "hover:bg-orange-600" });
+
+const historyData = [
+  { fecha: "2025-10-30 14:30", tipo: "ph",    valor: "7.2",                  estanque: "Estanque 1" },
+  { fecha: "2025-10-30 14:32", tipo: "o2",    valor: "5.6 mg/L",             estanque: "Estanque 1" },
+  { fecha: "2025-10-30 14:40", tipo: "manual",valor: "Aireadores encendidos (5 min)", estanque: "Estanque 1" },
+  { fecha: "2025-10-30 14:45", tipo: "temp",  valor: "26.1 °C",              estanque: "Estanque 1" },
+  { fecha: "2025-10-29 18:10", tipo: "manual",valor: "Dosificación Cal Viva (10 mL)", estanque: "Estanque 1" },
+];
+
+function renderHistory(data) {
+  historyTableBody.innerHTML = "";
+  if (!data.length) {
+      historyTableBody.innerHTML =
+          `<tr><td colspan="4" class="text-center text-slate-400 py-3">No hay registros</td></tr>`;
+      return;
+  }
+
+  data.forEach((item) => {
+      const row = document.createElement("tr");
+      row.innerHTML = `
+          <td class="px-4 py-2 border border-slate-700">${txt(item.fecha)}</td>
+          <td class="px-4 py-2 border border-slate-700 capitalize">${txt(item.tipo)}</td>
+          <td class="px-4 py-2 border border-slate-700">${txt(item.valor)}</td>
+          <td class="px-4 py-2 border border-slate-700">${txt(item.estanque)}</td>
+      `;
+      historyTableBody.appendChild(row);
+  });
+}
+
+applyFilter?.addEventListener("click", () => {
+  const date = filterDate.value;
+  const type = filterType.value;
+
+  const filtered = historyData.filter((item) => {
+      const matchDate = date ? item.fecha.startsWith(date) : true;
+      const matchType = type === "all" ? true : item.tipo === type;
+      return matchDate && matchType;
+  });
+
+  renderHistory(filtered);
+});
+
+renderHistory(historyData);
+
+// ===============================================================
+// 🔔 SISTEMA REAL DE NOTIFICACIONES — BACKEND + CAMPANA + DROPDOWN
+// ===============================================================
+
+// DOM
+const notifContent = document.getElementById("notifDropdownContent");
+const notifBadge   = document.getElementById("notifBadge");
+
+// Estado interno
+let NOTIFS = [];          // últimas 20
+let unreadCount = 0;
+
+// ==============================================
+// 📌 Cargar últimas 20 notificaciones desde Flask
+// ==============================================
+async function loadNotificaciones() {
+  try {
+    const res = await fetch("/api/notificaciones");
+    const data = await res.json();
+
+    NOTIFS = data; // ya viene como array [{id,tipo,mensaje,hora,leida}]
+    renderNotifDropdown();
+    updateNotifBadge();
+  } catch (err) {
+    console.error("❌ Error cargando notificaciones:", err);
+  }
+}
+
+// ==============================================
+// 📌 Cantidad de NO leídas (para badge 🔔)
+// ==============================================
+async function loadUnreadCount() {
+  try {
+    const res = await fetch("/api/notificaciones_no_leidas");
+    const { pendientes } = await res.json();
+    unreadCount = pendientes;
+    updateNotifBadge();
+  } catch (err) {
+    console.error("❌ Error cargando unread count:", err);
+  }
+}
+
+// ==============================================
+// 🎨 Renderizar notificaciones en el dropdown
+// ==============================================
+function renderNotifDropdown() {
+  notifContent.innerHTML = "";
+
+  if (!NOTIFS.length) {
+    notifContent.innerHTML =
+      `<p class="text-slate-400 text-center py-2 text-sm">Sin notificaciones</p>`;
+    return;
+  }
+
+  NOTIFS.forEach((n) => {
+    const div = document.createElement("div");
+    div.className =
+      "p-2 mb-2 rounded-md bg-[#0C2340] border border-slate-600 text-slate-200";
+
+    div.innerHTML = `
+      <p class="text-sm"><strong>${n.tipo}</strong> — ${n.mensaje}</p>
+      <p class="text-xs text-slate-400">${n.hora}</p>
+    `;
+    notifContent.appendChild(div);
+  });
+}
+
+// ==============================================
+// 🔔 Actualizar badge del icono
+// ==============================================
+function updateNotifBadge() {
+  if (unreadCount === 0) {
+    notifBadge.classList.add("hidden");
+    notifBadge.textContent = "0";
+  } else {
+    notifBadge.classList.remove("hidden");
+    notifBadge.textContent = unreadCount;
+  }
+}
+
+// ==============================================
+// 👁️ Marcar notificaciones como leídas
+// ==============================================
+async function marcarNotificacionesLeidas() {
+  try {
+    await fetch("/api/notificaciones_marcar_leidas", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({})  // marcar TODAS como leídas
+    });
+    unreadCount = 0;
+    updateNotifBadge();
+  } catch (err) {
+    console.error("❌ Error marcando como leídas:", err);
+  }
+}
+
+// ==============================================
+// 🛎️ Comportamiento al abrir la campana
+// ==============================================
+notifBtn.onclick = async (e) => {
+  e.stopPropagation();
+
+  notifDropdown.classList.toggle("hidden");
+
+  if (!notifDropdown.classList.contains("hidden")) {
+    // Al abrir → marcar como leídas
+    await marcarNotificacionesLeidas();
+    await loadNotificaciones();
+  }
+};
+
+// ==============================================
+// ⛔ Cerrar dropdown si clic fuera
+// ==============================================
+window.addEventListener("click", (e) => {
+  if (!notifDropdown.contains(e.target) && !notifBtn.contains(e.target)) {
+    notifDropdown.classList.add("hidden");
+  }
+});
+
+// ==============================================
+// 🔁 Ejecutar cada 4–5 segundos
+// ==============================================
+setInterval(() => {
+  loadUnreadCount();
+  loadNotificaciones();
+}, 5000);
+
+// Primera carga
+loadUnreadCount();
+loadNotificaciones();
+
+
+// ===============================================================
+// 🚨 SISTEMA DE ERRORES MULTIUSUARIO — MODAL + REINICIO DE PIDs
+// ===============================================================
+
+const modalError   = document.getElementById("errorModal");
+const modalDesc    = document.getElementById("errorDescription");
+const btnReiniciar = document.getElementById("btnReiniciarPID");
+applyInteractiveButton(btnReiniciar, { hoverClass: "hover:bg-green-700"});
+let errorList     = document.getElementById("errorList");
+
+let erroresActuales = [];
+let needPH = false;
+let needO2 = false;
+let todosResueltos = false;
+
+setInterval(checkErrores, 4000);
+checkErrores();
+
+async function checkErrores() {
+  try {
+      const res = await fetch("/api/errores_pendientes");
+      const data = await res.json();
+
+      if (!data.hay_error) {
+          modalError.classList.add("hidden");
+          erroresActuales = [];
+          return;
+      }
+
+	  // 🔍 detectar errores nuevos y actualizados
+	  erroresActuales = data.errores;
+	  needPH = data.reiniciar_ph;
+	  needO2 = data.reiniciar_o2;
+	  todosResueltos = data.todos_resueltos === true;
+
+	  mostrarModalErrores();
+
+  } catch (err) {
+      console.error("❌ Error consultando errores_pendientes:", err);
+  }
+}
+
+function mostrarModalErrores() {
+  modalError.classList.remove("hidden");
+  modalDesc.textContent = "Se han detectado errores en el sistema:";
+  errorList.innerHTML = "";
+
+  erroresActuales.forEach(err => {
+      const div = document.createElement("div");
+      div.className = "bg-red-900/30 border border-red-600 rounded-md p-2 space-y-1";
+      div.innerHTML = `
+          <p><strong>[${err.codigo}]</strong> ${err.descripcion}</p>
+          <p class="text-xs text-slate-400">Inicio: ${err.hora_inicio}</p>
+          <p class="text-xs text-slate-400">${err.hora_fin ? "Fin: " + err.hora_fin : "Aún activo"}</p>
+      `;
+      errorList.appendChild(div);
+  });
+
+  actualizarBotones();
+}
+
+function actualizarBotones() {
+  if (!todosResueltos) {
+      btnReiniciar.disabled = true;
+      btnReiniciar.classList.add("opacity-40", "pointer-events-none");
+  } else {
+      btnReiniciar.disabled = false;
+      btnReiniciar.classList.remove("opacity-40", "pointer-events-none");
+  }
+}
+
+btnReiniciar.addEventListener("click", async () => {
+  if (!todosResueltos) return;
+
+  btnReiniciar.disabled = true;
+  btnReiniciar.textContent = "Reiniciando...";
+
+  try {
+      const res = await fetch("/api/reiniciar_pids", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+              reiniciar_ph: needPH,
+              reiniciar_o2: needO2
+          })
+      });
+
+      const data = await res.json();
+
+      if (data.ok) {
+          btnReiniciar.textContent = "Reiniciado ✔";
+          setTimeout(() => {
+              modalError.classList.add("hidden");
+              btnReiniciar.textContent = "Reiniciar Control";
+              btnReiniciar.disabled = false;
+          }, 1500);
+      }
+
+  } catch (e) {
+      alert("No se pudo comunicar con el servidor.");
+      btnReiniciar.textContent = "Reiniciar Control";
+      btnReiniciar.disabled = false;
+  }
+});
