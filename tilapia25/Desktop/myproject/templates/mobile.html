@@ -1,0 +1,531 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Monitoreo — FCP</title>
+  <link rel="icon" href="../static/Imagenes/tilapia.png">
+  <!--Flask se encarga de direccionar la carpeta a static-->
+
+  <!--  Framework CSS -->
+  <link rel="stylesheet" href="../static/styles_Tailwind.css">
+
+
+  <!--  Íconos -->
+  <link rel="stylesheet" href="../static/fontAwesome/css/all.min.css">
+
+  <!--  Librería para gráficas -->
+  <script src="../static/js/chart.umd.min.js"></script>
+
+  <!--  Estilos internos -->
+  <style>
+    body {
+      background: #0C2340;
+      color: #E2E8F0;
+      font-family: 'Inter', sans-serif;
+      overflow-x: hidden;
+    }
+
+    /* Menú lateral (animación) */
+    #sideMenu {
+      transition: transform 0.35s ease-in-out;
+    }
+
+    #sideMenu.show {
+      transform: translateX(0);
+    }
+
+    @keyframes fadeIn {
+      from {
+        opacity: 0;
+        transform: scale(0.95);
+      }
+
+      to {
+        opacity: 1;
+        transform: scale(1);
+      }
+    }
+
+    .animate-fadeIn {
+      animation: fadeIn 0.25s ease-out;
+    }
+
+    #notifDropdownContent::-webkit-scrollbar {
+      width: 6px;
+    }
+
+    #notifDropdownContent::-webkit-scrollbar-thumb {
+      background-color: rgba(255, 255, 255, 0.2);
+      border-radius: 3px;
+    }
+
+    /* Scroll del listado de errores — Firefox */
+    #errorList {
+      scrollbar-width: thin;
+      scrollbar-color: #f97316 rgba(15, 23, 42, .8);
+      background-color: transparent !important;
+    }
+
+    /* Scroll Chrome / Edge / Opera */
+    #errorList::-webkit-scrollbar {
+      width: 8px;
+    }
+
+    #errorList::-webkit-scrollbar-track {
+      background: rgba(15, 23, 42, 0.9);
+      border-radius: 8px;
+    }
+
+    #errorList::-webkit-scrollbar-thumb {
+      background: #f97316;
+      /* Naranja Tailwind */
+      border-radius: 8px;
+      border: 2px solid rgba(15, 23, 42, 0.9);
+    }
+
+    #errorList::-webkit-scrollbar-thumb:hover {
+      background: #fb923c;
+      /* Naranja más claro */
+    }
+  </style>
+</head>
+
+<body class="min-h-screen">
+
+  <!--  HEADER FIJO (encabezado principal) -->
+  <header class="fixed top-0 left-0 w-full z-40 bg-[#102C54] shadow-lg">
+    <div class="flex items-center justify-between px-4 py-2 relative">
+
+      <!-- Botón del menú lateral (☰) -->
+      <button id="menuBtn" class="text-white text-3xl hover:text-orange-400 transition">&#x2630;</button>
+
+      <!-- Título centrado -->
+      <h1
+        class="absolute left-1/2 -translate-x-1/2 text-center text-lg sm:text-xl font-semibold text-white whitespace-nowrap">
+        Monitoreo de Estanques
+      </h1>
+    </div>
+
+    <!-- Botones de estanques + campana de notificación -->
+    <div class="flex items-center justify-around border-t border-slate-700 px-2 py-2 bg-[#0C2340]">
+      <button class="flex-1 mx-1 py-2 bg-orange-500 text-white rounded-lg font-semibold border-2 border-orange-600">
+        Estanque 1
+      </button>
+      <button class="flex-1 mx-1 py-2 bg-[#102C54] text-slate-300 rounded-lg font-semibold border-2 border-slate-600">
+        Estanque 2
+      </button>
+
+      <!-- Campana -->
+      <button id="notifBtn" class="text-slate-200 text-xl relative ml-1">
+        <i class="fa-solid fa-bell"></i>
+        <span id="notifBadge"
+          class="absolute -top-1 -right-1 bg-red-500 text-xs text-white rounded-full px-1 hidden">0</span>
+      </button>
+
+    </div>
+  </header>
+
+  <!--  MENÚ LATERAL IZQUIERDO -->
+  <aside id="sideMenu" class="fixed top-0 left-0 h-full w-64 bg-[#102C54] shadow-xl transform -translate-x-full z-50">
+    <div class="p-4 border-b border-slate-600 flex justify-between items-center">
+      <h2 class="text-lg font-semibold text-white">Menú</h2>
+      <button id="closeMenu" class="text-slate-300 text-2xl hover:text-orange-400">&times;</button>
+    </div>
+
+    <!-- Opciones del menú -->
+    <nav id="menuOptions" class="flex flex-col p-4 space-y-3 text-slate-200">
+      <button data-section="monitoreo"
+        class="menu-option text-left py-2 px-3 border-b-2 border-orange-500 text-orange-400 font-medium">🖥️
+        Monitoreo</button>
+      <button data-section="graficas" class="menu-option text-left py-2 px-3 hover:bg-slate-700 font-medium">📊
+        Gráficas</button>
+      <button data-section="control" class="menu-option text-left py-2 px-3 hover:bg-slate-700 font-medium">⚙️ Control
+        Manual</button>
+      <button data-section="historial" class="menu-option text-left py-2 px-3 hover:bg-slate-700 font-medium">🕓
+        Historial</button>
+      <button class="text-left py-2 px-3 text-red-400 hover:bg-slate-700 font-medium">🚪 Cerrar sesión</button>
+    </nav>
+  </aside>
+
+  <!--  NOTIFICACIONES DESPLEGABLES -->
+  <!-- Dropdown dinámico controlado desde JS -->
+  <div id="notifDropdown"
+    class="hidden fixed top-[90px] right-4 w-72 bg-[#102C54] border border-slate-600 rounded-lg shadow-lg z-50">
+    <div class="p-3 text-sm">
+      <p class="font-semibold text-orange-400 mb-2">Notificaciones</p>
+      <!-- Contenedor dinámico (rellenado por JS) -->
+      <div id="notifDropdownContent" class="max-h-60 overflow-y-auto"></div>
+    </div>
+  </div>
+
+
+  <!--  CONTENIDO PRINCIPAL -->
+  <main class="pt-[130px] px-3 pb-6">
+    <!--  SECCIÓN DE CLIMA ACTUAL -->
+    <section id="weatherSection" class="bg-[#102C54] rounded-xl border border-slate-600 p-4 mb-5 shadow-inner">
+      <h2
+        class="text-base sm:text-lg md:text-center md:text-3xl font-semibold text-orange-400 mb-3 flex items-center justify-center gap-2">
+        <img id="weather-icon" src="" alt="icono clima" class="w-8 h-8 hidden">
+        <span id="weather-title">Clima Actual</span>
+      </h2>
+
+      <!-- Contenedor de las variables del clima -->
+      <div class="grid grid-cols-3 gap-3 text-center">
+        <div class="flex flex-col items-center bg-[#0C2340] p-3 rounded-lg border border-slate-700">
+          <i class="fa-solid fa-temperature-half text-red-400 text-lg mb-1"></i>
+          <p class="text-xs text-slate-400">Temperatura</p>
+          <span id="weather-temp" class="text-xl font-bold">-- °C</span>
+        </div>
+        <div class="flex flex-col items-center bg-[#0C2340] p-3 rounded-lg border border-slate-700">
+          <i class="fa-solid fa-droplet text-blue-400 text-lg mb-1"></i>
+          <p class="text-xs text-slate-400">Humedad</p>
+          <span id="weather-hum" class="text-xl font-bold">-- %</span>
+        </div>
+        <div class="flex flex-col items-center bg-[#0C2340] p-3 rounded-lg border border-slate-700">
+          <i class="fa-solid fa-wind text-cyan-400 text-lg mb-1"></i>
+          <p class="text-xs text-slate-400">Viento</p>
+          <span id="weather-wind" class="text-xl font-bold">-- km/h</span>
+        </div>
+      </div>
+    </section>
+
+    <!--  SECCIÓN DE MONITOREO (cards) -->
+    <section id="monitoreoSection" class="grid grid-cols-1 md:grid-cols-2 gap-3 mt-2">
+      <!--  TÍTULO DEL BLOQUE DE SENSORES -->
+      <h2
+        class="md:col-span-2 text-base sm:text-lg font-semibold text-orange-400 mb-2 md:text-center md:text-3xl md:m-6">
+        📡 Monitoreo en Tiempo Real
+      </h2>
+
+      <!-- Cada card muestra un parámetro -->
+      <div class="bg-[#102C54] p-3 rounded-xl border border-slate-600 flex flex-col items-center">
+        <i class="fa-solid fa-water text-blue-400 text-lg mb-1"></i>
+        <p class="text-xs text-slate-400">pH</p><span id="val-ph" class="text-xl font-bold">--</span>
+      </div>
+      <div class="bg-[#102C54] p-3 rounded-xl border border-slate-600 flex flex-col items-center">
+        <i class="fa-solid fa-lungs text-teal-400 text-lg mb-1"></i>
+        <p class="text-xs text-slate-400">O₂</p><span id="val-o2" class="text-xl font-bold">--</span>
+      </div>
+      <div class="bg-[#102C54] p-3 rounded-xl border border-slate-600 flex flex-col items-center">
+        <i class="fa-solid fa-temperature-half text-red-400 text-lg mb-1"></i>
+        <p class="text-xs text-slate-400">Temperatura</p><span id="val-temp" class="text-xl font-bold">--</span>
+      </div>
+      <div class="bg-[#102C54] p-3 rounded-xl border border-slate-600 flex flex-col items-center">
+        <i class="fa-solid fa-eye-dropper text-yellow-400 text-lg mb-1"></i>
+        <p class="text-xs text-slate-400">Turbidez</p>
+        <span id="val-turbidez" class="text-xl font-bold">--</span>
+      </div>
+      <div
+        class="md:col-span-2 bg-[#102C54] p-3 rounded-xl border border-slate-600 flex flex-grow flex-col items-center">
+        <i class="fa-solid fa-smog text-gray-400 text-lg mb-1"></i>
+        <p class="text-xs text-slate-400">CO₂</p><span id="val-co2" class="text-xl font-bold">--</span>
+      </div>
+    </section>
+
+    <!--  SECCIÓN DE GRÁFICAS -->
+    <section id="chartsSection" class="hidden mt-3 md:p-6">
+      <div class="bg-[#102C54] rounded-xl border border-slate-600 p-3">
+        <h2 class="text-sm md:text-3xl md:text-center font-semibold text-orange-400 mb-2">Gráfica en tiempo real</h2>
+
+        <!-- Controles de variables -->
+        <div id="chartControls" class="flex flex-wrap justify-center gap-2 mb-3 md:mt-5">
+          <button data-var="0"
+            class="varBtn bg-orange-500 hover:bg-orange-600 text-white px-3 py-1 rounded-md text-sm font-medium">Temperatura</button>
+          <button data-var="1"
+            class="varBtn bg-blue-500 hover:bg-blue-600 text-white px-3 py-1 rounded-md text-sm font-medium">Oxígeno</button>
+          <button data-var="2"
+            class="varBtn bg-green-500 hover:bg-green-600 text-white px-3 py-1 rounded-md text-sm font-medium">pH</button>
+          <button data-var="3"
+            class="varBtn bg-gray-500 hover:bg-gray-600 text-white px-3 py-1 rounded-md text-sm font-medium">CO₂</button>
+          <button data-var="4"
+            class="varBtn bg-yellow-600 hover:bg-yellow-700 text-white px-3 py-1 rounded-md text-sm font-medium">Turbidez</button>
+        </div>
+
+        <!-- Gráfico principal -->
+        <div class="w-full overflow-hidden h-[500px] md:h-[400px]">
+          <canvas id="mainChart" style="width:100%;" height="400"></canvas>
+        </div>
+      </div>
+    </section>
+
+    <!--  SECCIÓN DE CONTROL MANUAL -->
+    <section id="controlSection" class="hidden mt-3 md:p-6">
+      <div class="bg-[#102C54] rounded-xl border border-slate-600 p-4 shadow-inner">
+        <h2 class="text-base sm:text-lg font-semibold text-orange-400 mb-4 md:text-center md:text-3xl">
+          ⚙️ Control Manual
+        </h2>
+
+        <!-- Estado global de PID -->
+        <div class="flex flex-col sm:flex-row justify-center gap-6 mb-6">
+
+          <div class="bg-[#0C2340] border border-slate-700 px-4 py-2 rounded-md text-center">
+            <p class="text-orange-300 font-semibold text-sm mb-1">Estado PID pH</p>
+            <p id="pidPhStatus" class="text-slate-200 text-sm">---</p>
+          </div>
+
+          <div class="bg-[#0C2340] border border-slate-700 px-4 py-2 rounded-md text-center">
+            <p class="text-orange-300 font-semibold text-sm mb-1">Estado PID O₂</p>
+            <p id="pidO2Status" class="text-slate-200 text-sm">---</p>
+          </div>
+
+          <!-- Temporizador de bloqueo pH + botón -->
+          <div id="phTimerBox"
+            class="hidden bg-[#0C2340] border border-slate-700 px-4 py-2 rounded-md text-center flex flex-col justify-center">
+
+            <p id="phTimerLabel" class="text-yellow-300 font-semibold text-sm mb-1">
+              <!-- Se actualiza desde JS -->
+            </p>
+
+            <button id="phResetBtn" class="mt-1 bg-red-600 hover:bg-red-700 text-white text-xs px-3 py-1 rounded-md">
+              Reiniciar pH
+            </button>
+          </div>
+
+        </div>
+        <!--  BOTÓN PARADA DE EMERGENCIA -->
+        <div class="w-full mb-6">
+          <button id="btnEmergency"
+            class="w-full py-3 mt-2 bg-red-700 text-white rounded-md font-extrabold text-xl shadow-md hover:bg-red-800 transition hidden">
+            Parada de Emergencia
+          </button>
+        </div>
+
+        <!-- Botones principales de activación -->
+        <div class="flex flex-col sm:flex-row sm:space-x-3 mb-6">
+          <button id="togglePhControl"
+            class="flex-1 py-2 bg-gray-500 text-white rounded-md font-semibold hover:bg-gray-600 transition">
+            Activar Control Manual pH
+          </button>
+          <button id="toggleO2Control"
+            class="flex-1 py-2 bg-gray-500 text-white rounded-md font-semibold hover:bg-gray-600 transition mt-3 sm:mt-0">
+            Activar Control Manual O₂
+          </button>
+        </div>
+
+        <!-- Contenedores de controles -->
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-5">
+          <!-- pH -->
+          <div id="phManualControls" class="hidden bg-[#0C2340] p-4 rounded-lg border border-slate-700">
+            <h3 class="text-sm font-semibold text-orange-300 mb-3 text-center sm:text-left">Ajuste de pH</h3>
+
+            <p id="phTaskLabel" class="text-green-400 text-sm mb-2 hidden"></p>
+
+            <div class="flex flex-col sm:flex-row sm:items-center sm:space-x-3 space-y-2 sm:space-y-0">
+
+              <div class="flex items-center flex-[2] bg-[#102C54] border border-slate-700 rounded-md p-1">
+                <select id="phDosePreset"
+                  class="w-full min-w-[100px] p-2 rounded bg-white text-black text-md focus:ring-2 focus:ring-blue-400 focus:outline-none">
+                  <option value="0">10 mL</option>
+                  <option value="1">20 mL</option>
+                  <option value="2">40 mL</option>
+                </select>
+              </div>
+
+              <!-- Mensajes (ocultos por defecto) -->
+              <p id="phCooldownLabel" class="text-yellow-400 text-sm mt-2 hidden"></p>
+              <p id="phBlockLabel" class="text-red-400 text-sm mt-1 hidden">Bloqueo de seguridad pH activado</p>
+
+              <button id="doseLime"
+                class="flex-[1] px-3 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition">
+                Cal Viva
+              </button>
+
+              <button id="doseCitric"
+                class="flex-[1] px-3 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 transition">
+                Ácido Cítrico
+              </button>
+            </div>
+          </div>
+
+          <!-- O₂ -->
+          <div id="o2ManualControls" class="hidden bg-[#0C2340] p-4 rounded-lg border border-slate-700">
+            <h3 class="text-sm font-semibold text-orange-300 mb-3 text-center sm:text-left">
+              Control de Aireadores
+            </h3>
+
+            <p id="o2TaskLabel" class="text-green-400 text-sm mt-2 hidden"></p>
+
+            <div class="flex flex-col sm:flex-row sm:items-center sm:space-x-3 space-y-2 sm:space-y-0">
+
+              <!-- Input + Unidad -->
+              <div class="flex items-center flex-1 bg-[#102C54] border border-slate-700 rounded-md p-1">
+
+                <!-- INPUT -->
+                <input type="number" id="o2Duration"
+                  class="flex-grow basis-1/3 rounded-md text-black bg-white text-sm px-2 py-[6px] focus:ring-2 focus:ring-blue-400 focus:outline-none"
+                  placeholder="Duración" min="1" value="5">
+
+                <!-- SELECT DE UNIDADES -->
+                <select id="o2Unit"
+                  class="bg-slate-700 text-white text-sm rounded-md px-2 py-[6px] ml-2 focus:ring-2 focus:ring-blue-400 focus:outline-none">
+                  <option value="min">min</option>
+                  <option value="h">horas</option>
+                </select>
+              </div>
+
+              <!-- BOTÓN ENCENDER -->
+              <button id="startAerators"
+                class="flex-1 sm:flex-[1_1_60%] px-3 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition">
+                Encender
+              </button>
+
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </section>
+
+    <!--  SECCIÓN DE HISTORIAL -->
+    <section id="historySection" class="hidden mt-3 md:p-6">
+      <div class="bg-[#102C54] rounded-xl border border-slate-600 p-4 shadow-inner">
+
+        <h2 class="text-base sm:text-lg font-semibold text-orange-400 mb-4 md:text-center md:text-3xl">
+          🕓 Historial de Lecturas y Acciones
+        </h2>
+
+        <!-- ================== FILTROS ================== -->
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-5">
+
+          <!-- Tipo de historial -->
+          <div>
+            <label class="text-xs text-slate-300">Tipo</label>
+            <select id="f_tipo"
+              class="w-full bg-[#0C2340] border border-slate-500 text-white rounded-md px-3 py-2 text-sm">
+              <option value="lecturas">Lecturas</option>
+              <option value="manuales">Acciones Manuales</option>
+              <option value="notificaciones">Notificaciones</option>
+            </select>
+          </div>
+
+          <!-- Periodo -->
+          <div>
+            <label class="text-xs text-slate-300">Período</label>
+            <select id="f_periodo"
+              class="w-full bg-[#0C2340] border border-slate-500 text-white rounded-md px-3 py-2 text-sm">
+              <option value="dia">Día</option>
+              <option value="mes">Mes</option>
+              <option value="año">Año</option>
+              <option value="rango">Rango</option>
+            </select>
+          </div>
+
+          <!-- Estanque (opcional, por ahora fijo) -->
+          <div>
+            <label class="text-xs text-slate-300">Estanque</label>
+            <select id="f_estanque"
+              class="w-full bg-[#0C2340] border border-slate-500 text-white rounded-md px-3 py-2 text-sm">
+              <option value="1">Estanque 1</option>
+              <option value="2">Estanque 2 </option>
+              <option value="todos">Todos</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- ================== FILTROS DINÁMICOS ================== -->
+        <div id="filtrosExtra" class="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-5">
+          <!-- Contenido generado por JS -->
+        </div>
+
+        <!-- Botón aplicar -->
+        <button id="btnAplicarFiltro"
+          class="bg-orange-500 hover:bg-orange-600 text-white font-semibold px-4 py-2 rounded-md text-sm mb-5">
+          Aplicar Filtro
+        </button>
+
+        <!-- ================== BOTÓN TABLA/GRÁFICA ================== -->
+        <button id="btnToggleVista"
+          class="bg-blue-600 hover:bg-blue-700 text-white font-semibold px-3 py-2 rounded-md text-sm mb-4">
+          Ver como Grafica
+        </button>
+
+        <!-- ================== CONTENEDOR DE GRÁFICA ================== -->
+        <div id="histChartContainer"
+          class="hidden bg-[#0C2340] p-3 rounded-lg border border-slate-700 h-[400px] md:h-[500px]">
+
+          <canvas id="histChart"></canvas>
+          <p id="histChartMsg" class="hidden text-center text-slate-300">
+            No hay datos para graficar.
+          </p>
+
+        </div>
+
+        <!-- ================== CONTENEDOR DE TABLA ================== -->
+        <div id="histTableContainer" class="overflow-x-auto hidden">
+          <table class="min-w-full text-sm text-left border border-slate-600 rounded-md">
+            <thead class="bg-[#0C2340] text-slate-300 uppercase text-xs">
+              <tr>
+                <th class="px-4 py-2 border border-slate-700">Fecha</th>
+                <th class="px-4 py-2 border border-slate-700">Hora</th>
+                <th class="px-4 py-2 border border-slate-700">Categoría</th>
+                <th class="px-4 py-2 border border-slate-700">Descripción / Valor</th>
+              </tr>
+            </thead>
+            <tbody id="histTableBody" class="divide-y divide-slate-700"></tbody>
+          </table>
+          <!-- PAGINACIÓN -->
+          <div id="histPagination" class="flex justify-between items-center mt-4 hidden">
+
+            <button id="histPrev" class="px-3 py-2 bg-slate-700 text-white rounded-md disabled:opacity-40">
+              ⬅ Anterior
+            </button>
+
+            <span id="histPageInfo" class="text-slate-300 text-sm"></span>
+
+            <button id="histNext" class="px-3 py-2 bg-slate-700 text-white rounded-md disabled:opacity-40">
+              Siguiente ➡
+            </button>
+
+          </div>
+
+        </div>
+
+        <!-- Mensaje si no hay datos -->
+        <p id="histMsg" class="text-center text-slate-300 mt-3 hidden">No se encontraron datos.</p>
+
+      </div>
+    </section>
+
+    <!-- ============================= -->
+    <!--  MODAL DE ERRORES SISTEMA -->
+    <!-- ============================= -->
+    <div id="errorModal"
+      class="hidden fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-[9999]">
+
+      <div
+        class="bg-[#102C54] border-2 border-red-500 rounded-2xl shadow-2xl p-6 w-[90%] max-w-md text-center animate-fadeIn">
+
+        <h2 class="text-2xl font-bold text-red-400 mb-3">Error Crítico Detectado</h2>
+
+        <p id="errorDescription" class="text-slate-200 text-base mb-4">
+          Se han detectado errores en el sistema:
+        </p>
+
+        <!-- LISTA DE ERRORES (scroll + estilo) -->
+        <div id="errorList"
+          class="text-left text-sm text-slate-300 mb-4 space-y-2 max-h-[300px] overflow-y-auto pr-2 border border-slate-700 rounded-md p-2 bg-[#0C2340]">
+          <!-- JS insertará aquí los errores -->
+        </div>
+
+        <!-- ACCIONES -->
+        <div id="errorActions" class="flex flex-col sm:flex-row justify-center gap-3">
+
+          <!-- Botón Reiniciar (oculto inicialmente) -->
+          <button id="btnReiniciarPID" class="bg-green-600 hover:bg-green-700 
+                     text-white px-5 py-2 rounded-md font-semibold transition-all">
+            Reiniciar Control
+          </button>
+        </div>
+
+      </div>
+    </div>
+
+  </main>
+
+  <script src="../static/js/mobile_v2.js"></script>
+
+</body>
+
+</html>
